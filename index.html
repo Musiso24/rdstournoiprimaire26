@@ -1004,19 +1004,59 @@
             window.scheduleData.filter(m => m.tournoi === trn && m.type !== 'Demi-finale' && m.type !== 'Finale').forEach(m => {
                 if(!teams[m.teamA]) teams[m.teamA] = {name: m.teamA, pts: 0, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0};
                 if(!teams[m.teamB]) teams[m.teamB] = {name: m.teamB, pts: 0, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0};
-                if(m.scoreA !== undefined && m.scoreB !== undefined && !m.isForfait && !m.inactiveTeamA && !m.inactiveTeamB) { 
-                    teams[m.teamA].p++; teams[m.teamB].p++;
-                    teams[m.teamA].gf += m.scoreA; teams[m.teamA].ga += m.scoreB;
-                    teams[m.teamB].gf += m.scoreB; teams[m.teamB].ga += m.scoreA;
-                    if(m.scoreA > m.scoreB) { teams[m.teamA].pts += 3; teams[m.teamA].w++; teams[m.teamB].l++; } 
-                    else if(m.scoreA < m.scoreB) { teams[m.teamB].pts += 3; teams[m.teamB].w++; teams[m.teamA].l++; } 
-                    else { teams[m.teamA].pts += 1; teams[m.teamA].d++; teams[m.teamB].pts += 1; teams[m.teamB].d++; }
-                } else if(m.isForfait) { 
-                    teams[m.teamA].p++; teams[m.teamB].p++;
-                    teams[m.teamA].gf += m.scoreA; teams[m.teamA].ga += m.scoreB;
-                    teams[m.teamB].gf += m.scoreB; teams[m.teamB].ga += m.scoreA;
-                    if(m.forfaitTeam === 'A') { teams[m.teamB].pts += 3; teams[m.teamB].w++; teams[m.teamA].l++; }
-                    else { teams[m.teamA].pts += 3; teams[m.teamA].w++; teams[m.teamB].l++; }
+
+                // Normal scored match
+                if(m.scoreA !== undefined && m.scoreB !== undefined && !m.isForfait) {
+                    // Add played/match stats only for teams that are NOT marked inactive for this match
+                    if(!m.inactiveTeamA) {
+                        teams[m.teamA].p++;
+                        teams[m.teamA].gf += m.scoreA;
+                        teams[m.teamA].ga += m.scoreB;
+                    }
+                    if(!m.inactiveTeamB) {
+                        teams[m.teamB].p++;
+                        teams[m.teamB].gf += m.scoreB;
+                        teams[m.teamB].ga += m.scoreA;
+                    }
+
+                    // Determine points/w/d/l per team depending on which sides are counted
+                    if(!m.inactiveTeamA && !m.inactiveTeamB) {
+                        if(m.scoreA > m.scoreB) { teams[m.teamA].pts += 3; teams[m.teamA].w++; teams[m.teamB].l++; }
+                        else if(m.scoreA < m.scoreB) { teams[m.teamB].pts += 3; teams[m.teamB].w++; teams[m.teamA].l++; }
+                        else { teams[m.teamA].pts += 1; teams[m.teamA].d++; teams[m.teamB].pts += 1; teams[m.teamB].d++; }
+                    } else if(!m.inactiveTeamA && m.inactiveTeamB) {
+                        if(m.scoreA > m.scoreB) { teams[m.teamA].pts += 3; teams[m.teamA].w++; }
+                        else if(m.scoreA < m.scoreB) { teams[m.teamA].l++; }
+                        else { teams[m.teamA].pts += 1; teams[m.teamA].d++; }
+                    } else if(m.inactiveTeamA && !m.inactiveTeamB) {
+                        if(m.scoreB > m.scoreA) { teams[m.teamB].pts += 3; teams[m.teamB].w++; }
+                        else if(m.scoreB < m.scoreA) { teams[m.teamB].l++; }
+                        else { teams[m.teamB].pts += 1; teams[m.teamB].d++; }
+                    }
+
+                } else if(m.isForfait) {
+                    // Forfeit: treat as 3-0 win for the non-forfait team, but only count teams that are not inactive
+                    const scoreA = m.scoreA !== undefined ? m.scoreA : (m.forfaitTeam === 'B' ? 3 : 0);
+                    const scoreB = m.scoreB !== undefined ? m.scoreB : (m.forfaitTeam === 'A' ? 3 : 0);
+
+                    if(!m.inactiveTeamA) {
+                        teams[m.teamA].p++;
+                        teams[m.teamA].gf += scoreA;
+                        teams[m.teamA].ga += scoreB;
+                    }
+                    if(!m.inactiveTeamB) {
+                        teams[m.teamB].p++;
+                        teams[m.teamB].gf += scoreB;
+                        teams[m.teamB].ga += scoreA;
+                    }
+
+                    if(m.forfaitTeam === 'A') {
+                        if(!m.inactiveTeamB) { teams[m.teamB].pts += 3; teams[m.teamB].w++; }
+                        if(!m.inactiveTeamA) { teams[m.teamA].l++; }
+                    } else if(m.forfaitTeam === 'B') {
+                        if(!m.inactiveTeamA) { teams[m.teamA].pts += 3; teams[m.teamA].w++; }
+                        if(!m.inactiveTeamB) { teams[m.teamB].l++; }
+                    }
                 }
             });
             Object.values(teams).forEach(t => t.gd = t.gf - t.ga);
@@ -1908,13 +1948,11 @@
                 for (const matchKey in window.matchStats) {
                     if(!matchKey.endsWith(`-${trn}`)) continue;
 
-                    const matchId = matchKey.split('-')[0].substring(0, 10);
-                    const match = window.scheduleData.find(m => m.id === matchId && m.tournoi === trn);
-                    
-                    // Skip inactive teams
-                    if(match && (match.inactiveTeamA || match.inactiveTeamB)) {
-                        continue;
-                    }
+                    // extract match id and tournoi from matchKey (format: `${id}-${tournoi}`)
+                    const parts = matchKey.split('-');
+                    const mTrn = parts[parts.length - 1];
+                    const mId = parts.slice(0, parts.length - 1).join('-');
+                    const match = window.scheduleData.find(m => m.id === mId && m.tournoi === mTrn);
 
                     let matchMvpId = null;
                     if(window.matchStats[matchKey].mvp) {
@@ -1923,6 +1961,12 @@
 
                     for (const teamName in window.matchStats[matchKey]) {
                         if(teamName === 'mvp') continue; 
+
+                        // If this team is marked inactive for this match, skip adding its player stats
+                        if(match && ((teamName === match.teamA && match.inactiveTeamA) || (teamName === match.teamB && match.inactiveTeamB))) {
+                            continue;
+                        }
+
                         const teamStats = window.matchStats[matchKey][teamName];
                         
                         for (const playerId in teamStats) {
